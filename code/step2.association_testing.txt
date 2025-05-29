@@ -1,0 +1,55 @@
+###########
+# INPUT DATA
+###########
+# WGS data: SHAPEIT Phasing Protocol for 200k WGS (field 20279), available on UKB RAP (Bulk/Whole genome sequences/SHAPEIT Phased VCFs). This was used for REGENIE step 2 (association testing)
+# SNP array data: Imputed genotype data (field 22418) (Bulk/Imputation/UKB imputation from genotype) HRC/1KG panel. This was used for REGENIE step 1 models
+
+# THE FOLLOWING COMMANDS WERE RUN ON UKB RAP. IF THEY DO NOT INCLUDE "dx run" THIS MEANS THEY WERE RUN ON A UKB RAP TTYD MACHINE, OR LOCALLY IF THERE IS NO SENSITIVE DATA
+
+###########
+# Defining set of individuals
+###########
+# QC on same reported / genetic sex, caucasian, no excess relatives, no het missing outlier
+# qcData[p31 == p22001][p22006 == "Caucasian"][p22021 != "Ten or more third-degree relatives identified"][p22027 != "Yes"]
+bcftools view -h ukb20279_c13_b0_v1.vcf.gz | tail -n 1 | sed 's/\t/\n/g' | tail -n +10 > 200k_samples_wgs_200031.txt
+grep -f eid_qc_caucasian_sexmatch_noexcessrelatives_nohetmissingoutlier.txt 200k_samples_wgs_200031.txt > 200k_wgs_samples_caucasian_qcced_166740.txt
+# Note: not all of them may have SNP array data
+
+###########
+# SNP array data
+###########
+# Prune samples
+dx run swiss-army-knife -iin=/Output/SNP_array/ukb22418.merged.bed -iin=/Output/SNP_array/ukb22418.merged.bim -iin=/Output/SNP_array/ukb22418.merged.fam -iin=/Cohort/200K_WGS/200k_wgs_samples_caucasian_qcced_166740.txt -icmd="plink2 --bfile ukb22418.merged --keep-fam 200k_wgs_samples_caucasian_qcced_166740.txt --autosome --make-bed --out ukb_200K_sampleprune_autosome" -imount_inputs=false --tag "plink_200k_step1" --destination /Output/SNP_array/200K/ --instance-type mem2_ssd1_v2_x8 --priority low --brief -y
+# LD prune
+dx run swiss-army-knife -iin=/Output/SNP_array/200K/ukb_200K_sampleprune_autosome.bed -iin=/Output/SNP_array/200K/ukb_200K_sampleprune_autosome.bim -iin=/Output/SNP_array/200K/ukb_200K_sampleprune_autosome.fam -icmd="plink2 -bfile ukb_200K_sampleprune_autosome --indep-pairwise 500 50 0.2 --make-bed --out ukb_200K_sampleprune_autosome_ldprune; plink2 -bfile ukb_200K_sampleprune_autosome_ldprune --extract ukb_200K_sampleprune_autosome_ldprune.prune.in --make-bed --out ukb_200K_sampleprune_autosome_ldprune" -imount_inputs=false --tag "plink_200k_step2" --destination /Output/SNP_array/200K/ --instance-type mem2_ssd1_v2_x8 --priority low --brief -y
+# QC
+dx run swiss-army-knife -iin=/Output/SNP_array/200K/ukb_200K_sampleprune_autosome_ldprune.bed -iin=/Output/SNP_array/200K/ukb_200K_sampleprune_autosome_ldprune.bim -iin=/Output/SNP_array/200K/ukb_200K_sampleprune_autosome_ldprune.fam -icmd="plink2 --bfile ukb_200K_sampleprune_autosome_ldprune --maf 0.01 --mac 100 --geno 0.1 --hwe 1e-15 --mind 0.1 --write-snplist --write-samples --no-id-header --out 200k_qc_pass" -imount_inputs=false --tag "plink_200k_step3" --destination /Output/SNP_array/200K/ --instance-type mem2_ssd1_v2_x8 --priority low --brief -y
+
+############
+# WGS data
+############
+# For speedup, first produce bcf with only the variants that will be tested across annotations
+# zless JAVIERRE.CADD15.annotations.gz | cut -f1 > ../javi_data # same for others
+cat cds_data abc_data crd_data javi_data | sed 's/:/\t/g' | cut -f1,2 | sort -k1,1 -k2,2n -V | uniq > all_vars_JAVIERRE_ABC_CRD_CDS.txt; gzip all_vars_JAVIERRE_ABC_CRD_CDS.txt
+for i in {1..22}; do dx run swiss-army-knife -iin=regenie/200k/input/all_vars_JAVIERRE_ABC_CRD_CDS.txt.gz -iin=/Phasing/step3_phase_rare/ukb200k_chr$i.full.shapeit5_rare.bcf -iin=/Phasing/step3_phase_rare/ukb200k_chr$i.full.shapeit5_rare.bcf.csi -icmd="bcftools view -T all_vars_JAVIERRE_ABC_CRD_CDS.txt.gz ukb200k_chr$i.full.shapeit5_rare.bcf -Ob -o ukb200k_chr$i.shapeit5.ANNOT.bcf --threads 8 && bcftools index ukb200k_chr$i.shapeit5.ANNOT.bcf --threads 8" -imount_inputs=false --tag "bcf_prune.$i" --destination /regenie/200k/input/bcf/ --instance-type mem2_ssd1_v2_x8 --brief -y --priority low; done
+# Convert to PGEN 
+for i in {1..22}; do dx run swiss-army-knife -iin=/regenie/200k/input/bcf/ukb200k_chr$i.shapeit5.ANNOT.bcf -iin=regenie/200k/input/wanted_psam_header -icmd="bcftools annotate -I %CHROM:%POS:%REF:%ALT ukb200k_chr$i.shapeit5.ANNOT.bcf -Ob -o ukb200k_chr$i.shapeit5.ANNOT.ID.bcf --threads 8; plink2 --bcf ukb200k_chr$i.shapeit5.ANNOT.ID.bcf --make-pgen erase-phase --out ukb200k_chr$i; awk '{print \$1\"\t\"\$1\"\t\"\$2}' ukb200k_chr$i.psam | tail -n +2 > ukb200k_chr$i.psam_tmp; cat wanted_psam_header ukb200k_chr$i.psam_tmp > ukb200k_chr$i.psam; rm ukb200k_chr$i.shapeit5.ANNOT.ID.bcf ukb200k_chr$i.psam_tmp ukb200k_chr$i.log" -imount_inputs=true --tag "prep_pgen" --tag "chr$i" --destination regenie/200k/input/pgen/ --instance-type mem1_ssd1_v2_x8 --priority low --brief -y; done
+# Merge chromosomes (for conditional, in TTYD)
+for i in {1..22}; do echo ukb200k_chr$i >> mergelist.txt; ./plink2 --pmerge-list mergelist.txt --out ukb200k_all_chr
+
+###########
+# REGENIE Step 1
+###########
+bash step1_run_models.sh
+sed 's/\/tmp/\/mnt\/project\/regenie\/200k\/step1/' ukb_200k_step1_pred.list > ukb_200k_step1_pred.list_mnt
+
+###########
+# REGENIE Step 2
+###########
+annot=CRD # ABC, JAVIERRE, NC, CDS
+# Gene-based collapsing
+for i in {1..22}; do bash step2_run_gene_tests_pgen.sh regenie/200k/input/pgen/ukb200k_chr$i regenie/200k/step1/ukb_200k_step1_pred.list_mnt regenie/200k/annotation/${annot}/c$i.${annot}.CADD15.annotations regenie/200k/annotation/${annot}/c$i.${annot}.CADD15.setlist regenie/200k/annotation/${annot}/$annot.mask regenie/200k/regenie_phenotype_21July2023.txt regenie/200k/regenie_covariate_21July2023.txt $annot.chr$i regenie/200k/step2/$annot/; done
+# Single variant analysis
+for i in {1..22}; do bash step2_run_single_tests_pgen.sh regenie/200k/input/pgen/ukb200k_chr$i regenie/200k/step1/ukb_200k_step1_pred.list_mnt regenie/200k/regenie_phenotype_21July2023.txt regenie/200k/regenie_covariate_21July2023.txt $annot.chr$i regenie/200k/step2/$annot.single/; done
+# Note, for CONTROL: use files from regenie/200k/input/pgen/CONTROL/
+
