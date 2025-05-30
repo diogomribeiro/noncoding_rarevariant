@@ -5,6 +5,7 @@ This repository contains scripts for data processing, analysis and figure genera
 ## Repository folders:
 - figures : contains R scripts for plotting all manuscript figures and source data for main figures
 - scripts : Rscripts or bash files used to process data and perform analysis (either locally or on UK Biobank RAP)
+- results : lists of gene-trait associations depending on variant annotations, before and after conditioning for GWAS variants
 
 ## Data availability
 Genetic and phenotypic data from the UK Biobank can be accessed through the UKB RAP platform.
