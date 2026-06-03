@@ -1,0 +1,113 @@
+
+############
+# Gene selection (GENCODE v42, Feb 2023)
+############
+# Only autosomal coding genes considered. MHC region genes excluded.
+wget https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_42/gencode.v42.basic.annotation.gff3.gz
+l gencode.v42.basic.annotation.gff3.gz | awk '$3=="gene"' | cut -f1,4,5,9 | sed 's/;/\t/g' | sed 's/=/\t/g' | cut -f1,2,3,5,9,11 | sed 's/\./\t/'  | cut -f1-4,6,7 > gencode_id_mapping.tsv
+l gencode_id_mapping.tsv | grep coding | awk '$1!="chrY"' | awk '$1!="chrM"' | awk '$1!="chrX"' > autosomal_coding_genes.bed
+bedtools subtract -a autosomal_coding_genes.bed -b mhc_region.bed > autosomal_coding_genes_noMHC.bed
+cut -f4 autosomal_coding_genes_noMHC.bed > wanted_genes_coding_autosomal_noMHC.txt
+l gencode.v42.basic.annotation.gff3.gz | awk '$3=="gene"' | cut -f1,4,5,7,9 | sed 's/;/\t/g' | sed 's/=/\t/g' |  cut -f1-4,6 | sed 's/\./\t/' | cut -f1-5 > gencode_coordinates.tsv
+
+###############
+# CDS
+###############
+l gencode.v42.basic.annotation.gff3.gz | awk '$3=="CDS"' | cut -f1,4,5,9 | sed 's/;/\t/g' | sed 's/=/\t/g' | cut -f1,2,3,9 | sed 's/\./\t/' | cut -f1-4 | sed 's/$/\tCDS/' > CDS.bed
+grep -f wanted_genes_coding_autosomal_noMHC.txt CDS.bed > CDS_wanted_genes.bed
+
+#############
+# ABC (activity-by-contact)
+#############
+# Data from Nasser et al. 2021 Nature https://doi.org/10.1038/s41586-021-03446-x
+wget ftp://ftp.broadinstitute.org/outgoing/lincRNA/ABC/AllPredictions.AvgHiC.ABC0.015.minus150.ForABCPaperV3.txt.gz
+# Parsing data
+Rscript process_nasser_abc.R
+sort -k1,1 -k2,2n -V abc_bloodtypes_score0.1_hg38.bed > abc_bloodtypes_score0.1_hg38_sorted.bed
+# Exclude CDS regions
+bedtools subtract -a abc_bloodtypes_score0.1_hg38_sorted.bed -b ../CDS/CDS.bed > abc_bloodtypes_score0.1_noCDS.bed
+# Filter for wanted genes
+grep -f ../wanted_genes_coding_autosomal_noMHC.txt abc_bloodtypes_score0.1_noCDS.bed > abc_bloodtypes_score0.1_noCDS_wanted_genes.bed
+# Add annotation tag
+sed -i 's/$/\tABC/' abc_bloodtypes_score0.1_noCDS_wanted_genes.bed
+
+###############
+# CRD (cis-regulatory domains)
+###############
+# T-cell, Monocyte and Neutrophil Data from Avalos et al. 2023 Communications Biology https://www.nature.com/articles/s42003-023-04688-3
+# LCL Data from Delaneau et al. 2019 Science https://www.science.org/doi/10.1126/science.aat8266
+# Parsing CRD files and association with genes per chromosome
+# Example usage: 
+python3 ParseCRDBlueprint.py hist_*.chr$i.tree.txt.gz hist_*_chr$i.links.txt hist_*_chr$i.bed
+# concatenate chromosomes
+cat hist_*_chr$i.bed >> hist_*_regions.bed;
+# Liftover hg19 to hg38
+./liftOver hist_*_regions.bed hg19ToHg38.over.chain.gz hist_*_regions_hg38.bed unlifted.bed
+# concatenate/merge 4 blood cell types
+cat hist_lcl_regions.bed hist_mono_regions.bed hist_neut_regions.bed hist_tcell_regions.bed > hist_crd_all_blood.bed
+sort -k1,1 -k2,2n hist_crd_all_blood.bed > hist_crd_all_blood_sorted.bed
+bedtools merge -i hist_crd_all_blood_sorted.bed -c 4 -o distinct > hist_crd_all_blood_sorted_merged.bed
+Rscript split_unpack.R hist_crd_all_blood_sorted_merged.bed hist_crd_all_blood_sorted_split.bed
+# Exclude CDS regions
+bedtools subtract -a hist_crd_all_blood_sorted_split.bed -b ../CDS/CDS.bed > CRD_noCDS.bed
+# Filter for wanted genes
+grep -f ../wanted_genes_coding_autosomal_noMHC.txt CRD_noCDS.bed > CRD_noCDS_wanted_genes.bed
+# Add annotation tag
+sed -i 's/$/\tCRD/' CRD_noCDS_wanted_genes.bed
+
+###############
+# HIC (promoter-capture Hi-C data) / AKA JAVIERRE
+###############
+# Data from Javierre et al 2016 "Lineage-Specific Genome Architecture Links Enhancers and Non-coding Disease Variants to Target Gene Promoters" https://www.sciencedirect.com/science/article/pii/S0092867416313228?via%3Dihub
+# Only considered interactions with CHICAGO score > 5 in at least one cell type
+# Parsing data (mapping gene name to ensembl ID, max 1Mb window from gene TSS)
+Rscript javierre_hic_parsing.R
+# LiftOver
+./liftOver javierre2016_chicago_above5_all_celltypes_no_interchrom_autosome_1mb_limit.tsv hg19ToHg38.over.chain.gz javierre2016_chicago_above5_all_celltypes_no_interchrom_autosome_1mb_limit_hg38.tsv unlifted.bed
+# Exclude CDS regions
+bedtools subtract -a javierre2016_chicago_above5_all_celltypes_no_interchrom_autosome_1mb_limit_hg38.tsv -b ../CDS/CDS.bed > javierre2016_noCDS.bed
+# Filter for wanted genes
+grep -f ../wanted_genes_coding_autosomal_noMHC.txt javierre2016_noCDS.bed > javierre2016_noCDS_wanted_genes.bed
+# Add annotation tag
+sed -i 's/$/\tJAVIERRE/' javierre2016_noCDS_wanted_genes.bed
+
+
+###########
+# Groupfiles / annotations
+###########
+# Create groupfiles (saige input format), filter by CADD, this obtains list of variants in genotype data (WGS)
+annot=CDS # CRD JAVIERRE ABC
+for i in {1..22}; do dx run swiss-army-knife -iin="Code/produce_groupfile_cadd.py" -iin="/Final_VCF/annotate/TSV/ukb24304_chr$i.annot.tsv.gz" -iin="/Output/multi_trait/annotation/$annot/$annot.chr$i.bed" -iin="/Output/multi_trait/CADD_ReMM/CADD.v1.6.hg38.phred15.chr$i.tsv.gz" -icmd="pip install numpy; pip install pandas; python3 produce_groupfile_cadd.py $annot.chr$i.bed ukb24304_chr$i.annot.tsv.gz c$i.$annot.CADD15.groupfile CADD.v1.6.hg38.phred15.chr$i.tsv.gz;" -imount_inputs=true --tag "c$i.groupfile" --destination "/regenie/200k/groupfiles/$annot" --instance-type mem3_ssd1_v2_x2 --priority low --brief -y; done
+# Convert groupfile format to REGENIE annotation and setlist
+annot=CDS # CRD JAVIERRE ABC
+for i in {1..22}; do python3 saige_groupfile_to_regenie.py c$i.$annot.CADD15.groupfile c$i.$annot.CADD15; done
+
+###############
+# NC (non-coding, ABC+CRD+HIC)
+###############
+for i in {1..22}; do python3 merge_groupfiles.py c$i.ABC.CADD15.groupfile c$i.CRD.CADD15.groupfile c$i.JAVIERRE.CADD15.groupfile c$i.NC.CADD15.groupfile; done
+for i in {1..22}; do python3 saige_groupfile_to_regenie.py c$i.NC.CADD15.groupfile c$i.NC.CADD15; done
+
+###############
+# CONTROL (relative to NC)
+###############
+# 1) Get gene windows
+Rscript get_gene_window.R
+grep -f /home/dribeiro/git/burdenNC/src/saige/annotations/wanted_genes_coding_autosomal_noMHC.txt coding_gene_1MB_window.bed | sed 's/+/CONTROL/' | sed 's/-/CONTROL/' > coding_gene_1MB_window_wanted_genes.bed
+for i in {1..22}; do echo awk \'\$1==\"chr$i\"\' coding_gene_1MB_window_wanted_genes.bed \> CONTROL.chr$i.bed; done
+for i in {1..22}; do echo dx upload CONTROL.chr$i.bed --path /regenie/200k/annotation/groupfiles/CONTROL/ --brief --no-progress; done
+# 2) Get list of variants on 200K WGS passing CADD 15
+for i in {1..22}; do dx run swiss-army-knife -iin="Code/produce_groupfile_cadd.py" -iin="project-GPvBp38JJfk2x1pZ7J7x33gp:/Final_VCF/annotate/TSV/ukb24304_chr$i.annot.tsv.gz" -iin="/regenie/200k/annotation/groupfiles/CONTROL/CONTROL.chr$i.bed" -iin="/Output/multi_trait/CADD_ReMM/CADD.v1.6.hg38.phred15.chr$i.tsv.gz" -icmd="pip install numpy; pip install pandas; python3 produce_groupfile_cadd.py CONTROL.chr$i.bed ukb24304_chr$i.annot.tsv.gz c$i.CONTROL.CADD15.groupfile CADD.v1.6.hg38.phred15.chr$i.tsv.gz;" -imount_inputs=true --tag "c$i.groupfile" --destination "/regenie/200k/groupfiles/CONTROL" --instance-type mem3_ssd1_v2_x2 --priority low --brief -y; done
+# 3) Get number of NC variants per gene
+data = fread("zcat dnanexus/NC.CADD15.annotations.gz", header = F)
+dt = data.table(table(data$V2))
+write.table(dt, "dnanexus/number_vars_NC.tsv", col.names=F,row.names = F,sep="\t",quote=F)
+# 4) Subsample variants
+for i in {1..22}; do dx run swiss-army-knife -iin=Code/produce_control_set.py -iin=regenie/200k/input/all_vars_JAVIERRE_ABC_CRD_CDS.chr$i.txt -iin=regenie/200k/annotation/groupfiles/CONTROL/number_vars_NC.tsv -iin=regenie/200k/annotation/groupfiles/CONTROL/c$i.CONTROL.CADD15.groupfile -icmd="pip install pandas; python3 produce_control_set.py number_vars_NC.tsv all_vars_JAVIERRE_ABC_CRD_CDS.chr$i.txt c$i.CONTROL.CADD15.groupfile c$i.CONTROL.groupfile" -imount_inputs=false --tag "produce.control.$i" --destination /regenie/200k/annotation/CONTROL/ --instance-type mem2_ssd1_v2_x2 --brief -y --priority low; done
+# 5) Convert groupfile to setlist and annotation files
+for i in {1..22}; do dx run swiss-army-knife -iin=Code/saige_groupfile_to_regenie.py -iin=/regenie/200k/annotation/CONTROL/c$i.CONTROL.groupfile -icmd="python3 saige_groupfile_to_regenie.py c$i.CONTROL.groupfile c$i.CONTROL" -imount_inputs=false --tag "convert.control.$i" --destination /regenie/200k/annotation/CONTROL/ --instance-type mem1_ssd1_v2_x2 --brief -y --priority low; done
+# 6) Create VCF/Plink files for these variants
+cat *annotations | sed 's/:/\t/g' | cut -f1,2 | sort -k1,1 -k2,2n -V | uniq > all_vars_CONTROL.txt; gzip all_vars_CONTROL.txt
+for i in {1..22}; do dx run swiss-army-knife -iin=/regenie/200k/input/all_vars_CONTROL.txt.gz -iin=/Phasing/step3_phase_rare/ukb200k_chr$i.full.shapeit5_rare.bcf -iin=/Phasing/step3_phase_rare/ukb200k_chr$i.full.shapeit5_rare.bcf.csi -icmd="bcftools view -T all_vars_CONTROL.txt.gz ukb200k_chr$i.full.shapeit5_rare.bcf -Ob -o ukb200k_chr$i.shapeit5.CONTROL.bcf --threads 8 && bcftools index ukb200k_chr$i.shapeit5.CONTROL.bcf --threads 8" -imount_inputs=false --tag "bcf_prune.$i" --destination /regenie/200k/input/bcf/CONTROL/ --instance-type mem2_ssd1_v2_x8 --brief -y --priority low; done
+for i in {1..22}; do dx run swiss-army-knife -iin=/regenie/200k/input/bcf/CONTROL/ukb200k_chr$i.shapeit5.CONTROL.bcf -iin=regenie/200k/input/wanted_psam_header -icmd="bcftools annotate -I %CHROM:%POS:%REF:%ALT ukb200k_chr$i.shapeit5.CONTROL.bcf -Ob -o ukb200k_chr$i.shapeit5.CONTROL.ID.bcf --threads 8; plink2 --bcf ukb200k_chr$i.shapeit5.CONTROL.ID.bcf --make-pgen erase-phase --out ukb200k_chr$i; awk '{print \$1\"\t\"\$1\"\t\"\$2}' ukb200k_chr$i.psam | tail -n +2 > ukb200k_chr$i.psam_tmp; cat wanted_psam_header ukb200k_chr$i.psam_tmp > ukb200k_chr$i.psam; rm ukb200k_chr$i.shapeit5.CONTROL.ID.bcf ukb200k_chr$i.psam_tmp ukb200k_chr$i.log" -imount_inputs=true --tag "prep_pgen" --tag "chr$i" --destination regenie/200k/input/pgen/CONTROL/ --instance-type mem1_ssd1_v2_x8 --priority low --brief -y; done
+

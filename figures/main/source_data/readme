@@ -1,0 +1,3 @@
+# NOTE: some source data was preprocessed for plotting purposes.
+
+# Data for Manhattan plots was pruned (when p-value > 0.05) to reduce number of dots in the plot. P-value was capped at 1e-50 to improve visibility. 

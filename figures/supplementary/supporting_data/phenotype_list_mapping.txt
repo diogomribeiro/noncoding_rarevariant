@@ -1,0 +1,93 @@
+eid	participant ID
+p31	sex
+p21022	age at recruitment
+p22009_a1	Genetic PC1
+p22009_a2	Genetic PC2
+p22009_a3	Genetic PC3
+p22009_a4	Genetic PC4
+p22009_a5	Genetic PC5
+p22009_a6	Genetic PC6
+p22009_a7	Genetic PC7
+p22009_a8	Genetic PC8
+p22009_a9	Genetic PC9
+p22009_a10	Genetic PC10
+p22009_a11	Genetic PC11
+p22009_a12	Genetic PC12
+p22009_a13	Genetic PC13
+p22009_a14	Genetic PC14
+p22009_a15	Genetic PC15
+p30160_i0	Basophill count
+p30220_i0	Basophill percentage
+p30150_i0	Eosinophill count
+p30210_i0	Eosinophill percentage
+p30030_i0	Haematocrit percentage
+p30020_i0	Haemoglobin concentration
+p30300_i0	High light scatter reticulocyte count
+p30290_i0	High light scatter reticulocyte percentage
+p30280_i0	Immature reticulocyte fraction
+p30120_i0	Lymphocyte count
+p30180_i0	Lymphocyte percentage
+p30050_i0	Mean corpuscular haemoglobin
+p30060_i0	Mean corpuscular haemoglobin concentration
+p30040_i0	Mean corpuscular volume
+p30100_i0	Mean platelet volume
+p30260_i0	Mean reticulocyte volume
+p30270_i0	Mean sphered cell volume
+p30130_i0	Monocyte count
+p30190_i0	Monocyte percentage
+p30140_i0	Neutrophill count
+p30200_i0	Neutrophill percentage
+p30080_i0	Platelet count
+p30090_i0	Platelet crit
+p30110_i0	Platelet distribution width
+p30010_i0	Red blood cell count
+p30070_i0	Red blood cell distribution width
+p30250_i0	Reticulocyte count
+p30240_i0	Reticulocyte percentage
+p30000_i0	White blood cell count
+p30620_i0	Alanine aminotransferase
+p30600_i0	Albumin
+p30610_i0	Alkaline phosphatase
+p30630_i0	Apolipoprotein A
+p30640_i0	Apolipoprotein B
+p30650_i0	Aspartate aminotransferase
+p30710_i0	C-reactive protein
+p30680_i0	Calcium
+p30690_i0	Cholesterol
+p30700_i0	Creatinine
+p30720_i0	Cystatin C
+p30660_i0	Direct bilirubin
+p30730_i0	Gammaglutamyl transferase
+p30740_i0	Glucose
+p30750_i0	Glycated haemoglobin (HbA1c)
+p30760_i0	HDL Cholesterol
+p30770_i0	IGF-1
+p30780_i0	LDL direct
+p30790_i0	Lipoprotein A
+p30800_i0	Oestradiol
+p30810_i0	Phosphate
+p30820_i0	Rheumatoid factor
+p30830_i0	SHBG
+p30850_i0	Testosterone
+p30840_i0	Total bilirubin
+p30860_i0	Total protein
+p30870_i0	Triglycerides
+p30880_i0	Urate
+p30670_i0	Urea
+p30890_i0	Vitamin D
+p50_i0	Standing height
+p20015_i0	Sitting height
+p21001_i0	Body mass index (BMI)
+p23099_i0	Body fat percentage
+p23105_i0	Basal metabolic rate
+p48_i0	Waist circumference
+p49_i0	Hip circumference
+p21002_i0	Weight
+p20022_i0	Birth weight
+p22191_i0	Adjusted T/S ratio
+p4080_i0_a0	Systolic blood pressure
+p4079_i0_a0	Diastolic blood pressure
+p102_i0_a0	Pulse rate
+p1160_i0	Sleep duration
+p20016_i0	Fluid intelligence score
+p20127_i0	Neuroticism score

@@ -1,0 +1,42 @@
+p30150_i0	Eosinophill count
+p30210_i0	Eosinophill percentage
+p30030_i0	Haematocrit percentage
+p30020_i0	Haemoglobin concentration
+p30300_i0	High light scatter reticulocyte count
+p30290_i0	High light scatter reticulocyte percentage
+p30280_i0	Immature reticulocyte fraction
+p30120_i0	Lymphocyte count
+p30180_i0	Lymphocyte percentage
+p30260_i0	Mean reticulocyte volume
+p30270_i0	Mean sphered cell volume
+p30130_i0	Monocyte count
+p30190_i0	Monocyte percentage
+p30140_i0	Neutrophill count
+p30200_i0	Neutrophill percentage
+p30080_i0	Platelet count
+p30090_i0	Platelet crit
+p30110_i0	Platelet distribution width
+p30010_i0	Red blood cell count
+p30070_i0	Red blood cell distribution width
+p30250_i0	Reticulocyte count
+p30240_i0	Reticulocyte percentage
+p30000_i0	White blood cell count
+p30620_i0	Alanine aminotransferase
+p30600_i0	Albumin
+p30630_i0	Apolipoprotein A
+p30640_i0	Apolipoprotein B
+p30650_i0	Aspartate aminotransferase
+p30710_i0	C-reactive protein
+p30680_i0	Calcium
+p30690_i0	Cholesterol
+p30700_i0	Creatinine
+p30720_i0	Cystatin C
+p30660_i0	Direct bilirubin
+p30750_i0	Glycated haemoglobin (HbA1c)
+p30760_i0	HDL Cholesterol
+p30770_i0	IGF-1
+p30810_i0	Phosphate
+p30850_i0	Testosterone
+p30860_i0	Total protein
+p30870_i0	Triglycerides
+p30670_i0	Urea

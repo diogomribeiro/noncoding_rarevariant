@@ -1,0 +1,101 @@
+# Running GCTA-COJO to obtain independent variants from GWAS to condition. Running REGENIE with conditional option.
+# Given summary stats and LD structure from genotype data, produce probability of association when accounting for all SNPs. With this we can have a list of independently-associated variants
+# Approach: start from SNP array imputed files used for PanUKB, get data for 10K subsamples, then run GCTA-COJO
+
+#########################
+# STEP 1: Prepare PAN UKB GWAS summary stats
+#########################
+## PAN UKB GWAS summary statistics, 18-Jul-2023
+https://docs.google.com/spreadsheets/d/1AeeADtT0U1AukliiNyiVzVRdLYPkTbruQSk38DeutU8/edit#gid=1450719288
+
+## Rscript
+library(data.table)
+data = fread("pan_ukbb_manifest_18072023.tsv")
+wanted = fread("phenotype_list", header = F)
+wanted$trait = data.table(unlist(lapply(wanted$V1, function(x) unlist(strsplit(x,"[_]"))[1])))$V1
+wanted$trait = data.table(unlist(lapply(wanted$trait, function(x) unlist(strsplit(x,"[p]"))[2])))$V1
+wantedData = data[phenocode %in% wanted$trait]
+write.table(wantedData$wget,"wget_summstats",quote=F, col.names=F, row.names=F)
+write.table(wantedData$wget_tabix,"wget_summstats_tabix",quote=F, col.names=F, row.names=F)
+table(wantedData$phenotype_qc_EUR)
+
+# Converting to GCTA input format
+for trait in `cat traits`; do echo $trait; val=`grep $trait pan_ukbb_manifest_18072023.tsv | cut -f6`; echo $val; dx run swiss-army-knife -iin=/regenie/200k/conditional_gwas/pan_ukb/$trait -icmd="zcat $trait | head -n 1 | sed 's/\t/\n/g' > $trait.header;af_EUR_col=\`grep -n af_EUR $trait.header | sed 's/:/\t/' | cut -f1\`;beta_EUR_col=\`grep -n beta_EUR $trait.header | sed 's/:/\t/' | cut -f1\`;se_EUR_col=\`grep -n se_EUR $trait.header | sed 's/:/\t/' | cut -f1\`;pval_EUR_col=\`grep -n neglog10_pval_EUR $trait.header | sed 's/:/\t/' | cut -f1\`; zcat $trait | awk -v af=\$af_EUR_col -v beta=\$beta_EUR_col -v se=\$se_EUR_col -v pval=\$pval_EUR_col '{print \$1\"_\"\$2\"_\"\$3\"_\"\$4\"\t\"\$4\"\t\"\$3\"\t\"\$af\"\t\"\$beta\"\t\"\$se\"\t\"\$pval}' | sed 's/$/\t$val/' | gzip > $trait.gcta.gz; rm $trait.header" -imount_inputs=false --tag "$trait" --destination /regenie/200k/conditional_gwas/pan_ukb/gcta_input --instance-type mem2_ssd2_v2_x8 --priority low --brief -y; done
+
+########################
+# STEP 2: Prepare SNP array data
+########################
+# Note: Subsample 10k unrelated samples caucasian passing QC filters with 200K WGS data. NOte that variants don't need QC because I will only be looking at GWAS variants (who passed QC)
+grep -f caucasian_unrelated_passing_qc.txt 200k_samples | shuf -n 10000 | awk '{print $1" "$1}' > 10k_samples_wgs_qc.txt
+# Convert to plink format and subsample 10K individuals
+for i in {1..22}; do dx run swiss-army-knife -iin=/regenie/conditional/gwas/10k_samples_wgs_qc.txt -iin=/Bulk/Imputation/UKB\ imputation\ from\ genotype/ukb22828_c${i}_b0_v3.bgen -iin=/Bulk/Imputation/UKB\ imputation\ from\ genotype/ukb22828_c${i}_b0_v3.sample -iin=/Bulk/Imputation/UKB\ imputation\ from\ genotype/ukb22828_c${i}_b0_v3.bgen.bgi -icmd="plink2 --bgen ukb22828_c${i}_b0_v3.bgen 'ref-first' --sample ukb22828_c${i}_b0_v3.sample --out ukb22828_c$i --make-pgen; plink2 --pgen ukb22828_c$i.pgen --psam ukb22828_c$i.psam --pvar ukb22828_c$i.pvar --keep 10k_samples_wgs_qc.txt --out ukb22828_c$i.10ksamples --make-bed --set-all-var-ids @_#_\\\$r_\\\$a --new-id-max-allele-len 1000;" -imount_inputs=true --tag "plink_sample_prune.chr$i" --destination /regenie/conditional/gwas/plink --instance-type mem1_ssd2_v2_x8 --priority low --brief -y; done
+
+####################
+# STEP 3: Run GTCA-COJO
+####################
+# wget https://yanglab.westlake.edu.cn/software/gcta/bin/gcta-1.94.1-linux-kernel-3-x86_64.zip
+# GTCA-COJO Parameters: window of 10Mb, collinearity = 0.9, p<1e-7
+for trait in `cat traits`; do tra=`echo $trait | cut -f2 -d"-"`; echo $tra; for i in {1..22}; do echo chr$i; dx run swiss-army-knife -iin=/Docker/gcta-1.94.1 -iin=/regenie/200k/conditional_gwas/plink_10k_samples/ukb22828_c$i.10ksamples.bed -iin=/regenie/200k/conditional_gwas/plink_10k_samples/ukb22828_c$i.10ksamples.bim -iin=/regenie/200k/conditional_gwas/plink_10k_samples/ukb22828_c$i.10ksamples.fam -iin=/regenie/200k/conditional_gwas/pan_ukb/gcta_input/$trait.gcta.gz -icmd="chmod a+x gcta-1.94.1; gunzip $trait.gcta.gz; ./gcta-1.94.1  --bfile ukb22828_c$i.10ksamples --chr $i --cojo-file $trait.gcta --cojo-slct --out $tra.chr$i.slct --cojo-p 1e-7 --cojo-collinear 0.9 --cojo-wind 10000 --threads 8; [ -e "$tra.chr$i.slct.ldr.cojo" ] && rm $tra.chr$i.slct.ldr.cojo $tra.chr$i.slct.cma.cojo $tra.chr$i.slct.log; rm $trait.gcta;" -imount_inputs=false --tag "gcta_cojo.chr$i" --destination /regenie/200k/conditional_gwas/gcta_cojo/$tra --instance-type mem2_ssd1_v2_x8 --priority low --brief -y; done; done
+# Note: some jobs crash or take too long to run. Lack of independent variant also makes software crash.
+
+######################
+# STEP 4: Obtain GWAS variants on 200K WGS dataset
+######################
+# 1) Get all GCTA-COJO independent variants (ttyd)
+for f in `ls -v *jma.cojo`; do cut -f2 $f | tail -n +2 >> all_vars.txt; done
+sort -V all_vars.txt | uniq | gzip > gwas_conditional_all_vars.txt.gz
+for t in `cat traits`; do cat $t.*jma.cojo | cut -f2 | grep -v "SNP" | sort -V > $t.conditional.cojo; done
+for u in `ls *conditional.cojo`; do dx upload $u --brief --path regenie/200k/conditional_gwas/conditional_vars/; done
+
+# Convert bgen to pgen. 
+for i in {1..22}; do dx run swiss-army-knife -iin=/Bulk/Imputation/UKB\ imputation\ from\ genotype/ukb22828_c${i}_b0_v3.bgen -iin=/Bulk/Imputation/UKB\ imputation\ from\ genotype/ukb22828_c${i}_b0_v3.sample -iin=/Bulk/Imputation/UKB\ imputation\ from\ genotype/ukb22828_c${i}_b0_v3.bgen.bgi -icmd="plink2 --bgen ukb22828_c${i}_b0_v3.bgen 'ref-first' --sample ukb22828_c${i}_b0_v3.sample --out ukb22828_c$i --make-pgen --set-all-var-ids @_#_\\\$r_\\\$a --new-id-max-allele-len 1000" -imount_inputs=true --tag "plink_pgen" --tag "chr$i" --destination /regenie/conditional/gwas/plink/ --instance-type mem1_ssd2_v2_x8 --priority low --brief -y; done
+# Prune for wanted variants
+for i in {1..22}; do dx run swiss-army-knife -iin=/regenie/200k/conditional_gwas/plink/ukb22828_c$i.pgen -iin=/regenie/200k/conditional_gwas/plink/ukb22828_c$i.psam -iin=/regenie/200k/conditional_gwas/plink/ukb22828_c$i.pvar -iin=/regenie/200k/conditional_gwas/conditional_vars/gwas_conditional_all_vars.txt.gz -icmd="plink2 --pgen ukb22828_c$i.pgen --pvar ukb22828_c$i.pvar --psam ukb22828_c$i.psam --extract gwas_conditional_all_vars.txt.gz --make-pgen --out ukb22828_c$i.conditional" -imount_inputs=true --tag "plink_pgen" --tag "chr$i" --destination /regenie/200k/conditional_gwas/plink_conditional/ --instance-type mem1_ssd2_v2_x8 --priority low --brief -y; done
+# Merge chromosomes into single file
+for i in {1..22}; do echo ukb22828_c$i.conditional >> mergelist.txt; done
+./plink2 --pmerge-list mergelist.txt --out ukb22828_all_chr.conditional
+
+#######################
+# STEP 5: Run REGENIE conditional
+#######################
+# Run REGENIE conditional across chromosomes (1 job per trait, using all conditional variants across chromosomes)
+annot=NC 
+for trait in `cut -f1 traits`; do echo $trait; bash step2_run_gene_tests_conditional.sh regenie/200k/input/pgen/ukb200k_all_chr regenie/200k/step1/ukb_200k_step1_pred.list_mnt regenie/200k/annotation/${annot}/${annot}.CADD15 $trait regenie/200k/annotation/${annot}/$annot.mask regenie/200k/conditional_gwas/conditional_vars/$(echo "$trait" | awk -F'[pi_]' '{print $2}').conditional.cojo /regenie/200k/conditional_gwas/plink_conditional/ukb22828_all_chr.conditional $annot regenie/200k/conditional_gwas/step2/$annot/; done
+
+
+#######################
+# STEP 6: conditional on LD
+#######################
+# Calculating LD between top associated rare variants and COJO hits
+awk '{print $0"\t"FILENAME}' *cojo > all_trait.conditional.cojo
+awk -F"_" '{print $1"\t"$2"\t"$2+1"\t"$0}' all_trait.conditional.cojo > all_trait.conditional.cojoall_trait.conditional_hg19.cojo
+./liftOver all_trait.conditional_hg19.cojo hg19ToHg38.over.chain.gz all_trait.conditional_hg38.cojo unlifted
+# Get pairs of variants for which to calculate LD
+Rscript produce_ld_pairings.R
+# Produced a "concat.pgen" file which has all NC associated hits + all cojo conditional hits (concat with bcftools and convert to pgen)
+# Note: WGS vars are in hg38, and SNP array in hg19
+# then run plink2 --ld for each pair
+while IFS= read -r line; do ./plink2 --pfile concat --ld $line; done < "ld_pairings_NC_fdr0.05.tsv" > ld_results.log
+python3 parse_plink_ld_results.py # produces ld_results_parsed.txt 
+sed -E 's/[[:space:]]+/ /g' ld_results_parsed.txt | sed 's/--ld//' | cut -d" " -f 1,2,3,6,9 | sed 's/ //' > ld_results_parsed_reformat.txt
+
+# Running single variant conditional on the 163 traits (ukbrap)
+for trait in `cut -f1 traits`; do echo $trait; bash step2_run_single_tests_conditional.sh regenie/200k/conditional_gwas/LD/ukb200k_163vars regenie/200k/step1/ukb_200k_step1_pred.list_mnt $trait regenie/200k/conditional_gwas/conditional_vars/$(echo "$trait" | awk -F'[pi_]' '{print $2}').conditional.cojo /regenie/200k/conditional_gwas/plink_conditional/ukb22828_all_chr.conditional 163vars.cond regenie/200k/conditional_gwas/step2/Single/163vars.cond/; done
+# Produce LD conditional files (ttyd)
+Rscript produce_ld_conditional_files.R
+# Running regenie per variant, conditioning for those in LD with the variant (ttyd)
+docker run -v $(pwd):/tmp -v /mnt/project/:/mnt/project -w /tmp -it ghcr.io/rgcgithub/regenie/regenie:v3.2.8.gz bash
+while IFS=$'\t' read -r var trait; do modvar="${var//:/_}"; modtrait="${trait#p}"; echo $var > current_var; echo $trait; regenie --step 2 --pgen ukb200k_163vars --extract current_var --phenoFile regenie_phenotype_21July2023.txt --covarFile regenie_covariate_21July2023.txt --phenoColList ${trait}_i0 --covarColList p31,p21022,p22009_a1,p22009_a2,p22009_a3,p22009_a4,p22009_a5,p22009_a6,p22009_a7,p22009_a8,p22009_a9,p22009_a10 --catCovarList p31 --qt  --pred ukb_200k_step1_pred.list_mnt --bsize 400 --minMAC 1 --apply-rint --out $modvar.cond.intersect --gz --condition-list $modvar.$modtrait.intersect.txt --condition-file pgen,ukb22828_all_chr.conditional --threads 3; done < to_process
+
+########################
+# STEP 7: PGS covariate
+########################
+# Idea is to use PGS as covariate, instead of a conditional analysis
+# PGS Data from Thompson et al. 2022 (these are based on external GWAS data (standard PGS))
+annot=NC
+# glycated hemoglobin
+for i in {1..22}; do bash step2_run_gene_tests_pgen_hemo.sh regenie/200k/input/pgen/ukb200k_chr$i regenie/200k/step1/ukb_200k_step1_pred.list_mnt regenie/200k/annotation/${annot}/c$i.${annot}.CADD15.annotations regenie/200k/annotation/${annot}/c$i.${annot}.CADD15.setlist regenie/200k/annotation/${annot}/$annot.mask regenie/200k/regenie_phenotype_21July2023.txt regenie/200k/regenie_covariate_21July2023_plusPGS.txt $annot.chr$i regenie/200k/conditional_pgs/step2/$annot/; done
+# HDL
+for i in {1..22}; do bash step2_run_gene_tests_pgen_hdl.sh regenie/200k/input/pgen/ukb200k_chr$i regenie/200k/step1/ukb_200k_step1_pred.list_mnt regenie/200k/annotation/${annot}/c$i.${annot}.CADD15.annotations regenie/200k/annotation/${annot}/c$i.${annot}.CADD15.setlist regenie/200k/annotation/${annot}/$annot.mask regenie/200k/regenie_phenotype_21July2023.txt regenie/200k/regenie_covariate_21July2023_plusPGS.txt $annot.chr$i regenie/200k/conditional_pgs/step2/$annot/; done
+# LDL
+for i in {1..22}; do bash step2_run_gene_tests_pgen_ldl.sh regenie/200k/input/pgen/ukb200k_chr$i regenie/200k/step1/ukb_200k_step1_pred.list_mnt regenie/200k/annotation/${annot}/c$i.${annot}.CADD15.annotations regenie/200k/annotation/${annot}/c$i.${annot}.CADD15.setlist regenie/200k/annotation/${annot}/$annot.mask regenie/200k/regenie_phenotype_21July2023.txt regenie/200k/regenie_covariate_21July2023_plusPGS.txt $annot.chr$i regenie/200k/conditional_pgs/step2/$annot/; done
